@@ -20,6 +20,9 @@ class NoteMutation(NoteQuery, Protocol):
     def update_note(note: NoteRequest) -> Note:
         """Update an existing note."""
 
+    def delete_note(self, note_id: str) -> bool:
+        """Delete an existing note."""
+
 
 class TagQuery(Protocol):
     def get_tag(id: str) -> list[Tag]:
