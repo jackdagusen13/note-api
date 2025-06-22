@@ -1,4 +1,6 @@
+import uuid
 from sqlalchemy import (
+    UUID,
     Table,
     create_engine,
     String,
@@ -21,19 +23,19 @@ note_tags_association = Table(
     Column('tag_id', String, ForeignKey('tags.id'), primary_key=True)
 )
 
-class Tag(Base):
+class TagRow(Base):
     __tablename__ = 'tags'
 
-    id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False, unique=True)
 
     notes = relationship('Note', secondary=note_tags_association, back_populates='tags')
 
 
-class Note(Base):
+class NoteRow(Base):
     __tablename__ = 'notes'
 
-    id = Column(String, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String, nullable=False)
     description = Column(String, nullable=False)
 
