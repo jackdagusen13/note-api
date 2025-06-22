@@ -42,7 +42,7 @@ class NoteRow(Base):
     tags = relationship('Tag', secondary=note_tags_association, back_populates='notes')
 
 
-engine = create_engine(url="sqlite:///places.db", echo=True)
+engine = create_engine(url="sqlite:///notes.db", echo=True)
 
 
 def get_session_maker() -> sessionmaker:
