@@ -19,8 +19,8 @@ class Base(DeclarativeBase):
 note_tags_association = Table(
     'note_tags',
     Base.metadata,
-    Column('note_id', String, ForeignKey('notes.id'), primary_key=True),
-    Column('tag_id', String, ForeignKey('tags.id'), primary_key=True)
+    Column('note_id', UUID, ForeignKey('notes.id'), primary_key=True),
+    Column('tag_id', UUID, ForeignKey('tags.id'), primary_key=True)
 )
 
 class TagRow(Base):
@@ -29,7 +29,7 @@ class TagRow(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False, unique=True)
 
-    notes = relationship('Note', secondary=note_tags_association, back_populates='tags')
+    notes = relationship('NoteRow', secondary=note_tags_association, back_populates='tags')
 
 
 class NoteRow(Base):
@@ -39,7 +39,7 @@ class NoteRow(Base):
     title = Column(String, nullable=False)
     description = Column(String, nullable=False)
 
-    tags = relationship('Tag', secondary=note_tags_association, back_populates='notes')
+    tags = relationship('TagRow', secondary=note_tags_association, back_populates='notes')
 
 
 engine = create_engine(url="sqlite:///notes.db", echo=True)

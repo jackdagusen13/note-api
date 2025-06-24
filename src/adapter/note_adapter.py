@@ -1,22 +1,23 @@
 from typing import Optional
 import uuid
-from src.domain.models import Note, Tag
-from src.domain.protocols.note import NoteMutation, TagMutation, TagQuery
-from src.domain.requests import NoteRequest, TagRequest
+from src.domain.models import Note, Tag, TagWithNotes
+from src.domain.protocols.note import NoteMutation, TagMutation
+from src.domain.requests import NoteRequest, NoteUpdateRequest, TagRequest
 from .schema import NoteRow, TagRow, engine, note_tags_association
 
 
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy import select, insert, update, delete
+from sqlalchemy import insert, update
+from sqlalchemy.orm import joinedload
 
 SessionLocal = sessionmaker(bind=engine)
 
 
-class NoteTagsAdapter(NoteMutation, TagMutation, TagQuery, TagMutation):
+class NoteTagsAdapter(NoteMutation, TagMutation):
     def __init__(self, session: Session = SessionLocal()) -> None:
         self._session = session
 
-    def get_note(self, note_id: str) -> Optional[Note]:
+    def get_note(self, note_id: uuid.UUID) -> Optional[Note]:
         note_row = (
             self._session.query(NoteRow)
             .filter(NoteRow.id == note_id)
@@ -33,7 +34,9 @@ class NoteTagsAdapter(NoteMutation, TagMutation, TagQuery, TagMutation):
             .all()
         )
 
-        return Note.model_validate(note_row, update={"tags": tag_rows})
+        note_row.tags = tag_rows
+
+        return Note.model_validate(note_row, from_attributes=True)
 
     def get_notes(self) -> list[Note]:
         note_rows = self._session.query(NoteRow).all()
@@ -50,50 +53,80 @@ class NoteTagsAdapter(NoteMutation, TagMutation, TagQuery, TagMutation):
             tag_map[note_id].append(tag)
 
         return [
-            Note.model_validate(note, update={"tags": tag_map.get(note.id, [])})
+            Note.model_validate(note, from_attributes=True).model_copy(update={"tags": tag_map.get(note.id, [])})
             for note in note_rows
         ]
 
+    def create_note(self, request: NoteRequest) -> Note:
+        new_note_id = uuid.uuid4()
+        new_note = Note(id=new_note_id, **request.model_dump())
 
-    def create_note(self, note: NoteRequest) -> Note:
-            new_note = Note(id=uuid.uuid4(), **note.model_dump())
-
-            if note.tags:
-                tag_ids = []
-                existing_tags = {
-                    tag.name: tag.id
-                    for tag in self._session.query(TagRow).filter(TagRow.name.in_([t.name for t in note.tags])).all()
-                }
-
-                for tag_data in note.tags:
-                    tag_name = tag_data.name
-                    if tag_name in existing_tags:
-                        tag_ids.append(existing_tags[tag_name])
-                    else:
-                        new_tag_id = uuid.uuid4()
-                        self._session.execute(insert(TagRow).values(id=new_tag_id, name=tag_name))
-                        tag_ids.append(new_tag_id)
-
-            self._session.execute(
-                insert(NoteRow).values(new_note.model_dump())
+        self._session.execute(
+            insert(NoteRow).values(
+                id=new_note.id,
+                title=new_note.title,
+                description=new_note.description
             )
+        )
 
-            if tag_ids:
+        tag_ids = []
+        if request.tag_names:
+            for tag_name in request.tag_names:
+                tag_row = self._session.query(TagRow).filter(TagRow.name == tag_name).first()
+                if not tag_row:
+                    tag_id = uuid.uuid4()
+                    tag_row = TagRow(id=tag_id, name=tag_name)
+                    self._session.add(tag_row)
+
+                tag_ids.append(tag_row.id)
                 self._session.execute(
-                    insert(note_tags_association).values([
-                        {"note_id": new_note.id, "tag_id": tag_id} for tag_id in tag_ids
-                    ])
+                    note_tags_association.insert().values(note_id=new_note_id, tag_id=tag_row.id)
                 )
 
-            return new_note
+        note_request = self.get_note(new_note_id)
 
-    def update_note(self, note_id: uuid.UUID, updated_note: NoteRequest) -> Note:
-        update_data = updated_note.model_dump(exclude={"tags"})
-        self._session.execute(
+        self._session.commit()
+
+        return note_request
+
+
+    def update_note(self, note_id: uuid.UUID, updated_note: NoteUpdateRequest) -> Note:
+        # Update note fields
+        update_values = {}
+        if updated_note.title is not None:
+            update_values["title"] = updated_note.title
+        if updated_note.description is not None:
+            update_values["description"] = updated_note.description
+
+        if update_values:
+            self._session.execute(
             update(NoteRow)
             .where(NoteRow.id == note_id)
-            .values(**update_data)
-        )
+            .values(**update_values)
+            )
+
+        if updated_note.tag_names:
+            # Remove existing associations
+            self._session.execute(
+                note_tags_association.delete().where(note_tags_association.c.note_id == note_id)
+            )
+
+            for tag_name in updated_note.tag_names:
+                tag_row = self._session.query(TagRow).filter(TagRow.name == tag_name).first()
+                if not tag_row:
+                    tag_id = uuid.uuid4()
+                    self._session.execute(
+                        insert(TagRow).values(id=tag_id, name=tag_name)
+                    )
+                    tag_row = self._session.query(TagRow).filter(TagRow.id == tag_id).first()
+                self._session.execute(
+                    note_tags_association.insert().values(note_id=note_id, tag_id=tag_row.id)
+                )
+
+        commited_note = self.get_note(note_id)
+        self._session.commit()
+
+        return commited_note
 
     def delete_note(self, note_id: str) -> bool:
         note = self._session.query(NoteRow).filter(NoteRow.id == note_id).first()
@@ -108,20 +141,36 @@ class NoteTagsAdapter(NoteMutation, TagMutation, TagQuery, TagMutation):
         self._session.commit()
         return True
 
-    def get_tag(self, id: str) -> list[Tag]:
-        """Retrieve tags linked to a specific note ID."""
-        results = (
+    def get_tag(self, name: str) -> Optional[TagWithNotes]:
+        tag_row = (
             self._session.query(TagRow)
-            .join(note_tags_association, TagRow.id == note_tags_association.c.tag_id)
-            .filter(note_tags_association.c.note_id == id)
-            .all()
+            .options(joinedload(TagRow.notes))
+            .filter(TagRow.name == name)
+            .first()
         )
-        return [Tag.model_validate(tag) for tag in results]
+        if not tag_row:
+            return None
+
+        notes = [
+            Note(
+                id=note.id,
+                title=note.title,
+                description=note.description,
+                tags=[Tag(name=t.name) for t in note.tags]
+            )
+            for note in tag_row.notes
+        ]
+
+        return TagWithNotes(
+            id=tag_row.id,
+            name=tag_row.name,
+            notes=notes
+        )
 
     def get_tags(self) -> list[Tag]:
         """Retrieve all tags."""
         tags = self._session.query(TagRow).all()
-        return [Tag.model_validate(tag) for tag in tags]
+        return [Tag.model_validate(tag.__dict__) for tag in tags]
 
     def create_tag(self, tag: TagRequest) -> list[Tag]:
         """Create a new tag."""

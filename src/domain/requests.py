@@ -11,4 +11,10 @@ class TagRequest(BaseModel):
 class NoteRequest(BaseModel):
     title: str
     description: str
-    tags: Optional[list[TagRequest]] = None
+    tag_names: list[str] = []
+
+
+class NoteUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    tag_names: list[str] = []
