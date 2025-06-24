@@ -1,12 +1,13 @@
 import contextlib
 from typing import Protocol, Optional, Generator
+import uuid
 
-from domain.models import Note, Tag
-from domain.requests import NoteRequest, TagRequest
+from src.domain.models import Note, Tag, TagWithNotes
+from src.domain.requests import NoteRequest, NoteUpdateRequest, TagRequest
 
 
 class NoteQuery(Protocol):
-    def get_note(note_id: str) -> Optional[Note]:
+    def get_note(note_id: uuid.UUID) -> Optional[Note]:
         """Retrieve a note by its ID."""
 
     def get_notes() -> list[Note]:
@@ -17,37 +18,37 @@ class NoteMutation(NoteQuery, Protocol):
     def create_note(note: NoteRequest) -> Note:
         """Create a new note."""
 
-    def update_note(note: NoteRequest) -> Note:
+    def update_note(note_id: uuid.UUID, note: NoteUpdateRequest) -> Note:
         """Update an existing note."""
 
-    def delete_note(self, note_id: str) -> bool:
+    def delete_note(note_id: uuid.UUID) -> bool:
         """Delete an existing note."""
 
 
 class TagQuery(Protocol):
-    def get_tag(id: str) -> list[Tag]:
-        """Retrieve a tag by it note ID."""
+    def get_tag(name: str) -> Optional[TagWithNotes]:
+        """Retrieve a tag by its name."""
 
-    def get_tags() -> list[Note]:
+    def get_tags() -> list[Tag]:
         """Retrieve all tags."""
 
 
-class TagMutation(Protocol):
+class TagMutation(TagQuery, Protocol):
     def create_tag(id: TagRequest) -> list[Tag]:
         """Create a new tag."""
 
 
 class Store(Protocol):
     note: NoteQuery
-    tag: TagQuery
+    tags: TagQuery
 
 
 class MutableStore(Protocol):
     note: NoteMutation
-    tag: TagMutation
+    tags: TagMutation
 
 
-class Ports(Protocol):
+class PortsInterface(Protocol):
     @contextlib.contextmanager
     def store(self) -> Generator[Store, None, None]:
         """Read only transactions"""

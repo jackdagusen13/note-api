@@ -1,21 +1,21 @@
+import uuid
 from pydantic import BaseModel
 from typing import Optional
 from decimal import Decimal
 
 
 class Tag(BaseModel):
-    id: str
     name: str
 
 
 class Note(BaseModel):
-    id: str
+    id: uuid.UUID
     title: str
     description: str
-    tags: Optional[list[Tag]] = None
+    tags: list[Tag] = []
 
 
 class TagWithNotes(BaseModel):
-    id: str
+    id: uuid.UUID
     name: str
-    notes: list[Note]
+    notes: list[Note] = []
